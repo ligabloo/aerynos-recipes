@@ -1,12 +1,49 @@
-# punktfunk for AerynOS (unofficial)
+# aerynos-recipes
 
-A personal moss repo for [punktfunk](https://git.unom.io/unom/punktfunk), built from the
-upstream release tag with boulder. Not affiliated with or supported by the punktfunk project.
-
-## Install
+Personal [AerynOS](https://aerynos.com) packages, built with boulder and served as a moss repo
+from this repo's `repo-x86_64` release. Unofficial, and not affiliated with the upstream projects.
 
 ```sh
-curl -fsSLO https://raw.githubusercontent.com/ligabloo/punktfunk-aerynos/main/install.sh
+sudo moss repo add aerynos-recipes https://github.com/ligabloo/aerynos-recipes/releases/download/repo-x86_64/stone.index
+sudo moss repo update aerynos-recipes
+```
+
+## Recipes
+
+| recipe | what |
+| --- | --- |
+| [`punktfunk`](recipes/punktfunk) | [punktfunk](https://git.unom.io/unom/punktfunk) game streaming host and client |
+
+## Layout
+
+```
+recipes/NAME/stone.yaml   the boulder recipe
+recipes/NAME/...          anything else the package needs, such as an install helper
+out/NAME/                 build output (not committed)
+```
+
+## Build and publish
+
+Once per machine, a boulder profile matching the system's stream:
+
+```sh
+boulder profile add unstable --repo 'name=unstable,base-uri=https://cdn.aerynos.dev/,channel=main,version=stream/unstable,arch=x86_64'
+```
+
+Then:
+
+```sh
+./publish.sh punktfunk              # build, then publish
+./publish.sh --no-build punktfunk   # publish what is already in out/punktfunk
+```
+
+`publish.sh` swaps in only the packages the named recipes built and keeps everything else in the
+release. Rebuild with a higher `release` when AerynOS bumps a library soname under a package.
+
+## punktfunk
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/ligabloo/aerynos-recipes/main/recipes/punktfunk/install.sh
 sh install.sh            # host, console, script runner and client
 sh install.sh --host     # streaming box only
 sh install.sh --client   # client only
@@ -18,14 +55,6 @@ moss runs no package scriptlets, so `install.sh` does what the Arch `.install` f
 upstream: the encode worker's `cap_sys_nice`, the sysctl drop-ins, `post-install`, the
 `input` group, and enabling `punktfunk-scripting` for every user. A bare `moss sync` drops the
 worker's capability until the next `install.sh update`.
-
-The repo itself is the `repo-x86_64` release:
-
-```sh
-sudo moss repo add punktfunk https://github.com/ligabloo/punktfunk-aerynos/releases/download/repo-x86_64/stone.index
-```
-
-## Packages
 
 | package | what |
 | --- | --- |
@@ -42,18 +71,11 @@ drop-in, no AppArmor profile), no Omarchy integration, no HDR `punktfunk-gamesco
 `pf-update` (the console can't apply updates; `install.sh update` does). The PAM file lives in
 `/usr/share/defaults/pam.d`.
 
-## Build a new version
+The console's login password is in `~/.config/punktfunk/web-password`. To change it, make that
+file the single line `PUNKTFUNK_UI_PASSWORD=<new>` and run `systemctl --user restart punktfunk-web`.
 
-1. In `recipe/stone.yaml`, set `version`, reset `release` to 1, and point the git upstream at
-   the tag's commit: `git ls-remote https://git.unom.io/unom/punktfunk.git 'refs/tags/vX.Y.Z^{}'`.
-2. If upstream moved the bun pin (`ci/bun.env`) or the Skia pin (`ci/skia-binaries.sh`),
-   update those upstreams too.
-3. `./publish.sh` builds against the `unstable` stream and replaces the release assets.
-
-The boulder profile, once per machine:
-
-```sh
-boulder profile add unstable --repo 'name=unstable,base-uri=https://cdn.aerynos.dev/,channel=main,version=stream/unstable,arch=x86_64'
-```
-
-Rebuild with a higher `release` when AerynOS bumps a library soname under the packages.
+To build a new version: in `recipes/punktfunk/stone.yaml`, set `version`, reset `release` to 1,
+and point the git upstream at the tag's commit
+(`git ls-remote https://git.unom.io/unom/punktfunk.git 'refs/tags/vX.Y.Z^{}'`). If upstream moved
+the bun pin (`ci/bun.env`) or the Skia pin (`ci/skia-binaries.sh`), update those upstreams too.
+Then `./publish.sh punktfunk`.

@@ -1,7 +1,7 @@
 #!/bin/sh
-# punktfunk on AerynOS: an unofficial moss repo, for personal use.
+# punktfunk on AerynOS, from the personal aerynos-recipes moss repo.
 #
-#   curl -fsSL https://raw.githubusercontent.com/ligabloo/punktfunk-aerynos/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/ligabloo/aerynos-recipes/main/recipes/punktfunk/install.sh | sh
 #   sh install.sh [install] [--host|--client|--all]   default --all
 #   sh install.sh update
 #   sh install.sh uninstall
@@ -11,8 +11,8 @@
 # the plugin runner for every user. Run `update` after each moss sync for the same reason.
 set -eu
 
-REPO_NAME=punktfunk
-INDEX_URL=${PUNKTFUNK_MOSS_INDEX:-https://github.com/ligabloo/punktfunk-aerynos/releases/download/repo-x86_64/stone.index}
+REPO_NAME=aerynos-recipes
+INDEX_URL=${PUNKTFUNK_MOSS_INDEX:-https://github.com/ligabloo/aerynos-recipes/releases/download/repo-x86_64/stone.index}
 
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m  !!\033[0m %s\n' "$*" >&2; }
@@ -103,7 +103,7 @@ do_install() {
         say "Repo '$REPO_NAME' is already set up"
     else
         say "Adding the '$REPO_NAME' moss repo"
-        as_root moss repo add "$REPO_NAME" "$INDEX_URL" -c "Unofficial punktfunk builds"
+        as_root moss repo add "$REPO_NAME" "$INDEX_URL" -c "Personal AerynOS packages"
     fi
     as_root moss repo update "$REPO_NAME"
 
@@ -160,10 +160,9 @@ do_uninstall() {
         # shellcheck disable=SC2086
         as_root moss -y pkg remove $PKGS
     fi
-    if have_repo; then
-        as_root moss repo remove "$REPO_NAME"
-    fi
     say "Removed. Your settings in ~/.config/punktfunk are kept."
+    # The repo holds other packages too, so it stays.
+    if have_repo; then echo "  To drop the repo as well: sudo moss repo remove $REPO_NAME"; fi
 }
 
 case "$CMD" in
