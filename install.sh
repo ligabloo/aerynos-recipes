@@ -120,7 +120,7 @@ do_install() {
   Start the host and the web console:
       systemctl --user enable --now punktfunk-host punktfunk-web
   The console's login password:
-      sed -n 's/^PUNKTFUNK_UI_PASSWORD=//p' ~/.config/punktfunk/web.env
+      sed -n 's/^PUNKTFUNK_UI_PASSWORD=//p' ~/.config/punktfunk/web-password
   Then open https://localhost:47992.
 
   For Steam Gaming Mode (gamescope) or the virtual Steam Deck pad, also join 'punktfunk'.
