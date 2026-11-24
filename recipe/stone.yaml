@@ -30,6 +30,7 @@ builddeps   :
     - binary(cmake)
     - binary(curl)
     - binary(git)
+    - binary(make)
     - binary(nasm)
     - binary(ninja)
     - binary(pkg-config)
