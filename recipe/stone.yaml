@@ -1,0 +1,348 @@
+# Unofficial AerynOS build of punktfunk, for personal use. Mirrors packaging/arch/PKGBUILD
+# upstream, minus what moss cannot carry: /etc files, install scriptlets (install.sh runs those
+# steps) and pf-update (its one-click apply has no moss leg).
+
+name        : punktfunk
+version     : "0.48.0"
+release     : 1
+homepage    : https://git.unom.io/unom/punktfunk
+upstreams   :
+    - git|https://git.unom.io/unom/punktfunk.git : 096d21d6578fd642aa17bbef821f0e43b9f6b3bf
+    # The bun pinned in ci/bun.env: build tool for the console and runner, and their runtime.
+    - https://github.com/oven-sh/bun/releases/download/bun-v1.4.4/bun-linux-x64-baseline.zip :
+        hash: e0446eb55995772eb9894bebae9a6be368d985a8b9271ee124486f9946eedd76
+        unpack: false
+    # The prebuilt Skia pinned in ci/skia-binaries.sh, read through SKIA_BINARIES_URL.
+    - https://github.com/rust-skia/skia-binaries/releases/download/0.153.3/skia-binaries-b7f043e0b1e2a850e702-x86_64-unknown-linux-gnu-ganesh-jpegd-jpege-pdf-textlayout-vulkan.tar.gz :
+        hash: 1620241c6f2247b6df21c6d201d5668693d2cf214f73dff06d66f40aa40f52b5
+        unpack: false
+summary     : Low-latency desktop and game streaming
+description : |
+    punktfunk streams a desktop or game session from a Linux host to native clients, with a
+    Moonlight-compatible mode. Unofficial AerynOS build.
+license     :
+    - MIT
+    - Apache-2.0
+networking  : true
+builddeps   :
+    - binary(cargo)
+    - binary(clang)
+    - binary(cmake)
+    - binary(curl)
+    - binary(git)
+    - binary(nasm)
+    - binary(ninja)
+    - binary(pkg-config)
+    - binary(python3)
+    - binary(unzip)
+    - pkgconfig(alsa)
+    - pkgconfig(dbus-1)
+    - pkgconfig(egl)
+    - pkgconfig(gbm)
+    - pkgconfig(gl)
+    - pkgconfig(gtk4)
+    - pkgconfig(libadwaita-1)
+    - pkgconfig(libcap)
+    - pkgconfig(libdrm)
+    - pkgconfig(libei-1.0)
+    - pkgconfig(libpipewire-0.3)
+    - pkgconfig(libudev)
+    - pkgconfig(libva)
+    - pkgconfig(opus)
+    - pkgconfig(sdl3)
+    - pkgconfig(vulkan)
+    - pkgconfig(wayland-client)
+    - pkgconfig(wayland-protocols)
+    - pkgconfig(xkbcommon)
+    - libstdc++-devel
+# aws-lc-sys compiles C with CFLAGS; LTO bitcode there breaks the rust link.
+tuning      :
+    - lto: false
+environment : |
+    export CARGO_TARGET_DIR="%(workdir)/target"
+    export PUNKTFUNK_BUILD_VERSION="%(version)-%(release)"
+    export PATH="%(workdir)/.pf-bun:$PATH"
+    PF_SKIA=$(find %(sourcedir) -maxdepth 3 -name 'skia-binaries-*.tar.gz' 2>/dev/null | head -n1)
+    if [ -n "$PF_SKIA" ]; then
+        export SKIA_BINARIES_URL="file://$(dirname "$PF_SKIA")/skia-binaries-{key}.tar.gz"
+    fi
+setup       : |
+    PF_BUNZIP=$(find %(sourcedir) -maxdepth 3 -name 'bun-linux-x64-baseline.zip' | head -n1)
+    test -n "$PF_BUNZIP" || { echo "bun zip not found under %(sourcedir)"; exit 1; }
+    rm -rf .pf-bun && mkdir -p .pf-bun
+    unzip -j -o "$PF_BUNZIP" '*/bun' -d .pf-bun
+    chmod 0755 .pf-bun/bun
+    bun --version
+    test -n "$SKIA_BINARIES_URL" || { echo "skia binaries not found under %(sourcedir)"; exit 1; }
+    cargo fetch --locked
+build       : |
+    # NVENC and Vulkan encode are dlopened at runtime, so both are safe on any GPU.
+    cargo build --release --locked --target %(target_triple) \
+        --features punktfunk-host/nvenc,punktfunk-host/vulkan-encode \
+        -p punktfunk-host -p punktfunk-encode-worker \
+        -p punktfunk-client-linux -p punktfunk-client-session -p punktfunk-cli \
+        -p punktfunk-seats
+    # The tray alone: co-built, the host's tokio features land on its zbus and it panics.
+    cargo build --release --locked --target %(target_triple) -p punktfunk-tray
+
+    ( cd web && bun install --frozen-lockfile --ignore-scripts && bun run build )
+    grep -q 'Bun\.serve' web/.output/server/index.mjs
+    ( cd sdk && bun install --frozen-lockfile --ignore-scripts && \
+      bun build src/runner-cli.ts --target=bun --outfile=../runner-cli.js )
+    grep -q 'attempt=' runner-cli.js
+install     : |
+    T="%(workdir)/target/%(target_triple)/release"
+    D="%(installroot)"
+
+    # --- punktfunk-host
+    install -Dm0755 "$T/punktfunk-host"          "$D/usr/bin/punktfunk-host"
+    install -Dm0755 "$T/punktfunk-encode-worker" "$D/usr/bin/punktfunk-encode-worker"
+    install -Dm0755 "$T/punktfunk-tray"          "$D/usr/bin/punktfunk-tray"
+    install -Dm0644 scripts/60-punktfunk.rules   "$D/usr/lib/udev/rules.d/60-punktfunk.rules"
+    install -Dm0644 scripts/60-punktfunk-dualsense.conf \
+        "$D/usr/share/wireplumber/wireplumber.conf.d/60-punktfunk-dualsense.conf"
+    for f in USB-Audio/conf.d/054c-0ce6.conf USB-Audio/conf.d/054c-0df2.conf \
+             USB-Audio/Punktfunk/DualSense-PS5-Haptic.conf \
+             USB-Audio/Punktfunk/DualSense-PS5-Haptic-HiFi.conf; do
+        install -Dm0644 "scripts/alsa-ucm2/$f" "$D/usr/share/alsa/ucm2/$f"
+    done
+    install -Dm0755 scripts/pf-dm-helper "$D/usr/lib/punktfunk/pf-dm-helper"
+    install -Dm0644 scripts/io.unom.punktfunk.dm-helper.policy \
+        "$D/usr/share/polkit-1/actions/io.unom.punktfunk.dm-helper.policy"
+    sed -i 's#/usr/libexec/punktfunk/pf-dm-helper#/usr/lib/punktfunk/pf-dm-helper#' \
+        "$D/usr/share/polkit-1/actions/io.unom.punktfunk.dm-helper.policy"
+    install -Dm0644 packaging/linux/49-punktfunk-power.rules \
+        "$D/usr/share/polkit-1/rules.d/49-punktfunk-power.rules"
+    install -Dm0755 packaging/linux/post-install.sh    "$D/usr/lib/punktfunk/post-install"
+    install -Dm0644 packaging/linux/punktfunk.sysusers "$D/usr/lib/sysusers.d/punktfunk.conf"
+    install -Dm0755 packaging/linux/restart-user-units.sh "$D/usr/lib/punktfunk/restart-user-units"
+    install -Dm0644 scripts/punktfunk-modules.conf "$D/usr/lib/modules-load.d/punktfunk.conf"
+    install -Dm0644 scripts/99-punktfunk-net.conf  "$D/usr/lib/sysctl.d/99-punktfunk-net.conf"
+    install -Dm0755 packaging/linux/90-punktfunk-frame-adapter \
+        "$D/usr/lib/NetworkManager/dispatcher.d/90-punktfunk-frame-adapter"
+    install -Dm0644 packaging/linux/50-punktfunk-nice.conf \
+        "$D/usr/lib/systemd/system/user@.service.d/50-punktfunk-nice.conf"
+    install -Dm0644 scripts/punktfunk-host.service "$D/usr/lib/systemd/user/punktfunk-host.service"
+    sed -i 's#%%h/punktfunk/target/release/punktfunk-host#/usr/bin/punktfunk-host#' \
+        "$D/usr/lib/systemd/user/punktfunk-host.service"
+    install -Dm0644 scripts/punktfunk-kde-session.service \
+        "$D/usr/lib/systemd/user/punktfunk-kde-session.service"
+    sed -i 's#%%h/punktfunk/scripts/headless/run-headless-kde.sh#/usr/share/punktfunk/headless/run-headless-kde.sh#' \
+        "$D/usr/lib/systemd/user/punktfunk-kde-session.service"
+    install -Dm0644 scripts/punktfunk-host-desktop-session.conf \
+        "$D/usr/share/punktfunk/punktfunk-host-desktop-session.conf"
+    # No moss leg in pf-update: the console shows the update, install.sh applies it.
+    printf 'moss stable\n' | install -Dm0644 /dev/stdin "$D/usr/share/punktfunk/install-kind"
+    for f in io.unom.punktfunk.host.desktop io.unom.punktfunk.starthost.desktop \
+             io.unom.punktfunk.webconsole.desktop; do
+        install -Dm0644 "packaging/linux/$f" "$D/usr/share/applications/$f"
+    done
+    for sz in 22x22 48x48; do
+        for png in packaging/linux/icons/hicolor/$sz/apps/*.png; do
+            install -Dm0644 "$png" "$D/usr/share/icons/hicolor/$sz/apps/$(basename "$png")"
+        done
+    done
+    install -Dm0755 scripts/headless/run-headless-kde.sh  "$D/usr/share/punktfunk/headless/run-headless-kde.sh"
+    install -Dm0755 scripts/headless/run-headless-sway.sh "$D/usr/share/punktfunk/headless/run-headless-sway.sh"
+    install -Dm0644 scripts/headless/kde-authorized       "$D/usr/share/punktfunk/headless/kde-authorized"
+    install -Dm0644 scripts/headless/punktfunk-sink.conf  "$D/usr/share/punktfunk/headless/punktfunk-sink.conf"
+    install -Dm0644 scripts/host.env.example   "$D/usr/share/punktfunk/host.env.example"
+    install -Dm0644 packaging/bazzite/host.env "$D/usr/share/punktfunk/host.env.bazzite"
+    install -Dm0644 packaging/kde/host.env     "$D/usr/share/punktfunk/host.env.kde"
+    install -Dm0644 api/openapi.json           "$D/usr/share/punktfunk/openapi.json"
+    for f in punktfunk-gamestream.xml punktfunk-native.xml punktfunk-web.xml; do
+        install -Dm0644 "packaging/linux/$f" "$D/usr/lib/firewalld/services/$f"
+    done
+
+    # --- punktfunk-client
+    install -Dm0755 "$T/punktfunk-client"  "$D/usr/bin/punktfunk-client"
+    install -Dm0755 "$T/punktfunk-session" "$D/usr/bin/punktfunk-session"
+    install -Dm0755 "$T/punktfunk"         "$D/usr/bin/punktfunk"
+    for f in io.unom.punktfunk.desktop io.unom.punktfunk.console.desktop; do
+        install -Dm0644 "packaging/linux/$f" "$D/usr/share/applications/$f"
+    done
+    install -Dm0644 scripts/70-punktfunk-client.rules "$D/usr/lib/udev/rules.d/70-punktfunk-client.rules"
+    install -Dm0644 scripts/99-punktfunk-client-net.conf \
+        "$D/usr/lib/sysctl.d/99-punktfunk-client-net.conf"
+    printf 'moss stable\n' | install -Dm0644 /dev/stdin "$D/usr/share/punktfunk-client/install-kind"
+
+    # --- punktfunk-seats
+    install -Dm0755 "$T/punktfunk-seats" "$D/usr/libexec/punktfunk/punktfunk-seats"
+    for f in seat-session seat-reap door-helper; do
+        install -Dm0755 "packaging/linux/$f" "$D/usr/libexec/punktfunk/$f"
+    done
+    install -Dm0755 packaging/linux/door-remove.sh "$D/usr/libexec/punktfunk/door-remove"
+    for f in punktfunk-seats.service punktfunk-seat@.service punktfunk-door.service \
+             punktfunk-web-door.service punktfunk-door-on@.service punktfunk-door-off@.service; do
+        install -Dm0644 "packaging/linux/$f" "$D/usr/lib/systemd/system/$f"
+    done
+    install -Dm0644 packaging/linux/punktfunk-seats-user.conf \
+        "$D/usr/lib/systemd/system/user@.service.d/50-punktfunk-seats.conf"
+    install -Dm0644 packaging/linux/punktfunk-seat.pam "$D/usr/share/defaults/pam.d/punktfunk-seat"
+    install -Dm0644 packaging/linux/punktfunk-seats.tmpfiles "$D/usr/lib/tmpfiles.d/punktfunk-seats.conf"
+    install -Dm0644 packaging/linux/65-punktfunk-seats.rules "$D/usr/lib/udev/rules.d/65-punktfunk-seats.rules"
+    install -Dm0644 packaging/linux/49-punktfunk-door.rules \
+        "$D/usr/share/polkit-1/rules.d/49-punktfunk-door.rules"
+
+    # --- punktfunk-icons
+    install -Dm0644 packaging/linux/icons/hicolor/scalable/apps/io.unom.punktfunk.svg \
+        "$D/usr/share/icons/hicolor/scalable/apps/io.unom.punktfunk.svg"
+    ln -s io.unom.punktfunk.svg "$D/usr/share/icons/hicolor/scalable/apps/io.unom.Punktfunk.svg"
+
+    # --- punktfunk-bun
+    install -Dm0755 .pf-bun/bun "$D/usr/lib/punktfunk-bun/bun"
+
+    # --- punktfunk-web
+    install -d "$D/usr/share/punktfunk-web/.output"
+    cp -r web/.output/server "$D/usr/share/punktfunk-web/.output/server"
+    cp -r web/.output/public "$D/usr/share/punktfunk-web/.output/public"
+    printf '%%s\n' '#!/bin/sh' 'exec /usr/lib/punktfunk-bun/bun /usr/share/punktfunk-web/.output/server/index.mjs "$@"' \
+        | install -Dm0755 /dev/stdin "$D/usr/bin/punktfunk-web-server"
+    install -Dm0644 scripts/punktfunk-web.service      "$D/usr/lib/systemd/user/punktfunk-web.service"
+    install -Dm0644 scripts/punktfunk-web-init.service "$D/usr/lib/systemd/user/punktfunk-web-init.service"
+    install -Dm0755 scripts/web-init.sh                "$D/usr/share/punktfunk-web/web-init.sh"
+    install -Dm0644 web/web.env.example                "$D/usr/share/punktfunk-web/web.env.example"
+
+    # --- punktfunk-scripting
+    install -Dm0644 runner-cli.js "$D/usr/share/punktfunk-scripting/runner-cli.js"
+    printf '%%s\n' '#!/bin/sh' 'exec /usr/lib/punktfunk-bun/bun /usr/share/punktfunk-scripting/runner-cli.js "$@"' \
+        | install -Dm0755 /dev/stdin "$D/usr/bin/punktfunk-scripting"
+    install -Dm0644 scripts/punktfunk-scripting.service \
+        "$D/usr/lib/systemd/user/punktfunk-scripting.service"
+    install -Dm0644 scripts/punktfunk-scripting-seat@.service \
+        "$D/usr/lib/systemd/user/punktfunk-scripting-seat@.service"
+
+    # --- punktfunk (metapackage): licences and readme
+    install -Dm0644 LICENSE-MIT    "$D/usr/share/licenses/punktfunk/LICENSE-MIT"
+    install -Dm0644 LICENSE-APACHE "$D/usr/share/licenses/punktfunk/LICENSE-APACHE"
+    install -Dm0644 README.md      "$D/usr/share/doc/punktfunk/README.md"
+packages    :
+    - "%(name)-host":
+        summary: punktfunk streaming host
+        description: |
+            The punktfunk host: captures a desktop or gamescope session and streams it.
+        rundeps:
+            - "%(name)-icons"
+            - "%(name)-seats"
+            - libei
+            - libglvnd
+            - libva
+            - pipewire
+            - vulkan-loader
+            - wireplumber
+        paths:
+            - /usr/bin/punktfunk-host
+            - /usr/bin/punktfunk-encode-worker
+            - /usr/bin/punktfunk-tray
+            - /usr/lib/udev/rules.d/60-punktfunk.rules
+            - /usr/share/wireplumber/wireplumber.conf.d/60-punktfunk-dualsense.conf
+            - /usr/share/alsa/ucm2/USB-Audio/conf.d/054c-0ce6.conf
+            - /usr/share/alsa/ucm2/USB-Audio/conf.d/054c-0df2.conf
+            - /usr/share/alsa/ucm2/USB-Audio/Punktfunk/
+            - /usr/lib/punktfunk/
+            - /usr/share/polkit-1/actions/io.unom.punktfunk.dm-helper.policy
+            - /usr/share/polkit-1/rules.d/49-punktfunk-power.rules
+            - /usr/lib/sysusers.d/punktfunk.conf
+            - /usr/lib/modules-load.d/punktfunk.conf
+            - /usr/lib/sysctl.d/99-punktfunk-net.conf
+            - /usr/lib/NetworkManager/dispatcher.d/90-punktfunk-frame-adapter
+            - /usr/lib/systemd/system/user@.service.d/50-punktfunk-nice.conf
+            - /usr/lib/systemd/user/punktfunk-host.service
+            - /usr/lib/systemd/user/punktfunk-kde-session.service
+            - /usr/share/punktfunk/
+            - /usr/share/applications/io.unom.punktfunk.host.desktop
+            - /usr/share/applications/io.unom.punktfunk.starthost.desktop
+            - /usr/share/applications/io.unom.punktfunk.webconsole.desktop
+            - /usr/share/icons/hicolor/22x22/
+            - /usr/share/icons/hicolor/48x48/
+            - /usr/lib/firewalld/services/
+    - "%(name)-client":
+        summary: punktfunk native GTK4 client
+        description: |
+            The punktfunk desktop client, its Vulkan session streamer and the headless CLI.
+        rundeps:
+            - "%(name)-icons"
+            - libglvnd
+            - libva
+            - pipewire
+            - vulkan-loader
+            - wireplumber
+        paths:
+            - /usr/bin/punktfunk-client
+            - /usr/bin/punktfunk-session
+            - /usr/bin/punktfunk
+            - /usr/share/applications/io.unom.punktfunk.desktop
+            - /usr/share/applications/io.unom.punktfunk.console.desktop
+            - /usr/lib/udev/rules.d/70-punktfunk-client.rules
+            - /usr/lib/sysctl.d/99-punktfunk-client-net.conf
+            - /usr/share/punktfunk-client/
+    - "%(name)-seats":
+        summary: punktfunk seat supervisor and door
+        description: |
+            Profile seats and the door: a user, a logind session and a host per profile. Ships disabled.
+        rundeps:
+            - acl
+            - procps
+            - shadow
+            - systemd
+            - util-linux
+        paths:
+            - /usr/libexec/punktfunk/
+            - /usr/lib/systemd/system/punktfunk-seats.service
+            - /usr/lib/systemd/system/punktfunk-seat@.service
+            - /usr/lib/systemd/system/punktfunk-door.service
+            - /usr/lib/systemd/system/punktfunk-web-door.service
+            - /usr/lib/systemd/system/punktfunk-door-on@.service
+            - /usr/lib/systemd/system/punktfunk-door-off@.service
+            - /usr/lib/systemd/system/user@.service.d/50-punktfunk-seats.conf
+            - /usr/share/defaults/pam.d/punktfunk-seat
+            - /usr/lib/tmpfiles.d/punktfunk-seats.conf
+            - /usr/lib/udev/rules.d/65-punktfunk-seats.rules
+            - /usr/share/polkit-1/rules.d/49-punktfunk-door.rules
+    - "%(name)-icons":
+        summary: punktfunk brand icons
+        description: |
+            The brand mark the host and client desktop entries name.
+        paths:
+            - /usr/share/icons/hicolor/scalable/apps/io.unom.punktfunk.svg
+            - /usr/share/icons/hicolor/scalable/apps/io.unom.Punktfunk.svg
+    - "%(name)-bun":
+        summary: Private bun runtime for punktfunk-web and punktfunk-scripting
+        description: |
+            The bun build punktfunk-web and punktfunk-scripting run on. Not on PATH.
+        paths:
+            - /usr/lib/punktfunk-bun/
+    - "%(name)-web":
+        summary: punktfunk management web console
+        description: |
+            Pairing, status and settings in the browser. Runs as a systemd user unit.
+        rundeps:
+            - "%(name)-bun"
+        paths:
+            - /usr/bin/punktfunk-web-server
+            - /usr/share/punktfunk-web/
+            - /usr/lib/systemd/user/punktfunk-web.service
+            - /usr/lib/systemd/user/punktfunk-web-init.service
+    - "%(name)-scripting":
+        summary: punktfunk plugin and script runner
+        description: |
+            Supervises host automation scripts and punktfunk-plugin-* packages in a bubblewrap sandbox.
+        rundeps:
+            - "%(name)-bun"
+            - bubblewrap
+            - passt
+            - util-linux
+        paths:
+            - /usr/bin/punktfunk-scripting
+            - /usr/share/punktfunk-scripting/
+            - /usr/lib/systemd/user/punktfunk-scripting.service
+            - /usr/lib/systemd/user/punktfunk-scripting-seat@.service
+    - "%(name)":
+        summary: punktfunk host, client, console and script runner
+        description: |
+            Metapackage: everything a streaming box and its own client need.
+        rundeps:
+            - "%(name)-host"
+            - "%(name)-client"
+            - "%(name)-web"
+            - "%(name)-scripting"
