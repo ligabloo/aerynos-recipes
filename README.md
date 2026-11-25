@@ -41,6 +41,16 @@ Then:
 `publish.sh` swaps in only the packages the named recipes built and keeps everything else in the
 release. Rebuild with a higher `release` when AerynOS bumps a library soname under a package.
 
+## rex-gtk
+
+```sh
+sudo moss repo update aerynos-recipes
+sudo moss pkg add rex-gtk
+```
+
+To build a new version: in `recipes/rex-gtk/stone.yaml`, set `version`, reset `release` to 1,
+and point the git upstream at the new commit of https://github.com/ligabloo/rex-gtk.
+
 ## punktfunk
 
 ```sh
