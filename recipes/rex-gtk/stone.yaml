@@ -3,11 +3,11 @@
 # Zig fetches its dependencies (Ghostty, zig-gobject, fonts) during setup, hence networking.
 
 name        : rex-gtk
-version     : "0.1.0"
-release     : 2
+version     : "0.2.0"
+release     : 1
 homepage    : https://github.com/ligabloo/rex-gtk
 upstreams   :
-    - git|https://github.com/ligabloo/rex-gtk.git : 8bd933a0dc2a634af134c31987ff123ac0984341
+    - git|https://github.com/ligabloo/rex-gtk.git : de91df3d2383226c79008d3664e0ac3f46f8b8f0
 summary     : GTK client for the Rex terminal multiplexer
 description : |
     Shows the sessions on a Rex server, with each session's windows as tabs and their splits,
