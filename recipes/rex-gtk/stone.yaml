@@ -1,0 +1,47 @@
+# AerynOS build of rex-gtk, a GTK client for the Rex terminal multiplexer.
+# The upstream below must be reachable: push rex-gtk first and point the git URL at it.
+# Zig fetches its dependencies (Ghostty, zig-gobject, fonts) during setup, hence networking.
+
+name        : rex-gtk
+version     : "0.1.0"
+release     : 1
+homepage    : https://github.com/ligabloo/rex-gtk
+upstreams   :
+    - git|https://github.com/ligabloo/rex-gtk.git : 83b440f4c6c37b59bd430f487e93839ed5f663f6
+summary     : GTK client for the Rex terminal multiplexer
+description : |
+    Shows the sessions on a Rex server, with each session's windows as tabs and their splits,
+    zoom and floating panes kept in step with the server. Terminals are drawn on the GPU with
+    Ghostty's renderer. Unofficial; not affiliated with Rex.
+license     :
+    - MIT
+networking  : true
+builddeps   :
+    - binary(zig)
+    - binary(pkg-config)
+    - pkgconfig(egl)
+    - pkgconfig(epoxy)
+    - pkgconfig(fontconfig)
+    - pkgconfig(freetype2)
+    - pkgconfig(gl)
+    - pkgconfig(graphene-1.0)
+    - pkgconfig(gtk4)
+    - pkgconfig(harfbuzz)
+    - pkgconfig(libadwaita-1)
+    - pkgconfig(libpng)
+    - pkgconfig(vulkan)
+    - pkgconfig(xkbcommon)
+    - pkgconfig(zlib)
+environment : |
+    export ZIG_GLOBAL_CACHE_DIR="%(workdir)/.zig-global"
+    export ZIG_LOCAL_CACHE_DIR="%(workdir)/.zig-cache"
+setup       : |
+    zig build --fetch
+build       : |
+    # x86_64_v2 rather than the build machine's CPU, so the binary runs anywhere AerynOS does.
+    zig build -Doptimize=ReleaseFast -Dcpu=x86_64_v2 -Dtools=false --prefix "%(workdir)/stage"
+install     : |
+    D="%(installroot)/usr"
+    install -Dm0755 "%(workdir)/stage/bin/rex-gtk" "$D/bin/rex-gtk"
+    cp -r "%(workdir)/stage/share" "$D/"
+    install -Dm0644 README.md "$D/share/doc/rex-gtk/README.md"

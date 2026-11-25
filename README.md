@@ -13,6 +13,7 @@ sudo moss repo update aerynos-recipes
 | recipe | what |
 | --- | --- |
 | [`punktfunk`](recipes/punktfunk) | [punktfunk](https://git.unom.io/unom/punktfunk) game streaming host and client |
+| [`rex-gtk`](recipes/rex-gtk) | GTK client for the [Rex](https://superlogical.com) terminal multiplexer |
 
 ## Layout
 
